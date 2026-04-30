@@ -62,7 +62,9 @@ git push -u origin main
 
 After a minute, the site is at `https://YOUR_USER.github.io/YOUR_REPO/`.
 
-**Important:** Pages users still need a reachable proxy (same machine, VPN, or a small host you deploy with TLS and secrets). Point **API base** in the UI to that URL.
+**Important:** Pages users still need a reachable proxy (VPN, office network, or a small host you deploy with **HTTPS** and secrets). Point **API base** in the UI to that URL.
+
+Browsers often **block** an `https://*.github.io` page from calling `http://127.0.0.1` (mixed content / private network rules). For day-to-day use on one PC, run the static `docs/` site over HTTP as well (see above with `python3 -m http.server`) while the proxy runs on `127.0.0.1:8765`. For use **from** the hosted GitHub Pages URL, deploy the proxy behind **HTTPS** (for example a small VPS with a reverse proxy and Let’s Encrypt).
 
 ## Optional: deploy the proxy
 
