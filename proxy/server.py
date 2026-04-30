@@ -5,6 +5,7 @@ Mirrors the API flow in alta/faces.py: login → list watchlists → generate fa
 → create profile → attach face. Keeps credentials off GitHub Pages.
 
 HTTP API: POST /api/enroll, GET /api/patients-profiles, GET /api/health.
+Set ALTA_DEBUG=1 for verbose stderr traces during POST /api/v1/dologin (password is never printed).
 """
 
 import base64
@@ -27,6 +28,27 @@ HOST = os.environ.get("ALTA_HOST", "").strip().rstrip("/")
 USERNAME = os.environ.get("ALTA_USERNAME", "").strip()
 PASSWORD = os.environ.get("ALTA_PASSWORD", "").strip()
 DEFAULT_WATCHLIST = os.environ.get("WATCHLIST_NAME", "patients").strip().lower()
+
+
+def _alta_debug_verbose() -> bool:
+    v = os.environ.get("ALTA_DEBUG", "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def _login_log(msg: str, *, always: bool = False) -> None:
+    """stderr traces for login. Set ALTA_DEBUG=1 for full detail; failed logins always get one line."""
+    if always or _alta_debug_verbose():
+        print(f"[alta-login] {msg}", file=sys.stderr, flush=True)
+
+
+def _safe_headers_for_log(session: requests.Session) -> str:
+    h = dict(session.headers)
+    # avoid dumping huge auth headers if any
+    for k in list(h.keys()):
+        if k.lower() == "authorization":
+            h[k] = "<redacted>"
+    return repr(h)
+
 
 # Some Avigilon Alta cloud hosts return 401 for the default python-requests User-Agent.
 _DEFAULT_UA = (
@@ -93,7 +115,34 @@ def do_login(session: requests.Session, host: str, username: str, password: str)
         path = "/api/v1/dologin"
 
     url = base + path
+    ua = session.headers.get("User-Agent", "")
+    _login_log(
+        f"POST {url} | username={username!r} (len={len(username)}) | password len={len(password)} | "
+        f"User-Agent[:80]={ua[:80]!r}…",
+        always=_alta_debug_verbose(),
+    )
+    if _alta_debug_verbose():
+        _login_log(f"request headers: {_safe_headers_for_log(session)}")
+
     resp = session.post(url, json=cred, timeout=60)
+
+    ct = (resp.headers.get("Content-Type") or "").split(";")[0].strip()
+    body_preview = (resp.text or "")[:600].replace("\r", " ").replace("\n", " ")
+    set_cookie = resp.headers.get("Set-Cookie")
+    _login_log(
+        f"response status={resp.status_code} {resp.reason!r} | Content-Type={ct!r} | "
+        f"Content-Length={resp.headers.get('Content-Length', '?')} | Set-Cookie present={bool(set_cookie)}",
+        always=True,
+    )
+    if resp.status_code != 200 or _alta_debug_verbose():
+        _login_log(f"response body preview: {body_preview!r}", always=(resp.status_code != 200))
+    if _alta_debug_verbose():
+        try:
+            cj = list(session.cookies.keys())
+            _login_log(f"session.cookies after login: {cj}")
+        except Exception as ex:
+            _login_log(f"session.cookies read failed: {ex}")
+
     resp.raise_for_status()
     return _login_response_json(resp)
 
@@ -421,6 +470,12 @@ def api_patients_profiles():
 def main():
     if not HOST:
         print("Warning: ALTA_HOST not set. Copy proxy/.env.example to proxy/.env.", file=sys.stderr)
+    if _alta_debug_verbose():
+        print(
+            "[alta-login] ALTA_DEBUG=1: verbose login traces enabled (stderr).",
+            file=sys.stderr,
+            flush=True,
+        )
     host_bind = os.environ.get("PROXY_HOST", "127.0.0.1")
     port = int(os.environ.get("PROXY_PORT", "8765"))
     app.run(host=host_bind, port=port, debug=os.environ.get("FLASK_DEBUG") == "1")
