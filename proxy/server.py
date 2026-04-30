@@ -10,6 +10,7 @@ to log password repr (remove after troubleshooting — credentials in logs are a
 """
 
 import base64
+import json
 import os
 import re
 import sys
@@ -166,6 +167,11 @@ def do_login(session: requests.Session, host: str, username: str, password: str)
             always=True,
         )
         _login_log(f"request headers: {_safe_headers_for_log(session)}", always=True)
+        _login_log(
+            "dologin request JSON (contains password — only with ALTA_DEBUG=1): "
+            + json.dumps(cred, ensure_ascii=False),
+            always=True,
+        )
 
     resp = session.post(url, json=cred, timeout=60)
 
