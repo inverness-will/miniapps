@@ -102,11 +102,10 @@ _DEFAULT_UA = (
 
 
 def apply_alta_session_defaults(session: requests.Session) -> None:
-    session.headers.setdefault("Accept", "application/json, text/plain, */*")
-    session.headers.setdefault(
-        "User-Agent",
-        (os.environ.get("ALTA_USER_AGENT") or "").strip() or _DEFAULT_UA,
-    )
+    # Session() pre-populates User-Agent (python-requests/…) and Accept (*/*).
+    # setdefault does NOT override those, so we must assign to match browser clients.
+    session.headers["Accept"] = "application/json, text/plain, */*"
+    session.headers["User-Agent"] = (os.environ.get("ALTA_USER_AGENT") or "").strip() or _DEFAULT_UA
 
 
 def aware_get(session: requests.Session, url: str, params=None) -> Any:
@@ -143,8 +142,8 @@ def do_login(session: requests.Session, host: str, username: str, password: str)
     Default path is /api/v1/dologin (same as faces.py). Set ALTA_LOGIN_PATH only if your
     server uses a different path; use /api/v1/dologin or the shorthand dologin.
     """
-    _log_login_credentials(host, username, password)
     apply_alta_session_defaults(session)
+    _log_login_credentials(host, username, password)
     base = host.rstrip("/")
     cred = {"username": username, "password": password}
 
