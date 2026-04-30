@@ -23,13 +23,28 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-HOST = os.environ.get("ALTA_HOST", "").rstrip("/")
-USERNAME = os.environ.get("ALTA_USERNAME", "")
-PASSWORD = os.environ.get("ALTA_PASSWORD", "")
+HOST = os.environ.get("ALTA_HOST", "").strip().rstrip("/")
+USERNAME = os.environ.get("ALTA_USERNAME", "").strip()
+PASSWORD = os.environ.get("ALTA_PASSWORD", "").strip()
 DEFAULT_WATCHLIST = os.environ.get("WATCHLIST_NAME", "patients").strip().lower()
+
+# Some Avigilon Alta cloud hosts return 401 for the default python-requests User-Agent.
+_DEFAULT_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+)
+
+
+def apply_alta_session_defaults(session: requests.Session) -> None:
+    session.headers.setdefault("Accept", "application/json, text/plain, */*")
+    session.headers.setdefault(
+        "User-Agent",
+        (os.environ.get("ALTA_USER_AGENT") or "").strip() or _DEFAULT_UA,
+    )
 
 
 def aware_get(session: requests.Session, url: str, params=None) -> Any:
+    apply_alta_session_defaults(session)
     resp = session.get(url, params=params, timeout=60)
     resp.raise_for_status()
     if resp.content:
@@ -38,6 +53,7 @@ def aware_get(session: requests.Session, url: str, params=None) -> Any:
 
 
 def aware_post(session: requests.Session, url: str, data: dict) -> Any:
+    apply_alta_session_defaults(session)
     resp = session.post(url, json=data, timeout=60)
     resp.raise_for_status()
     if resp.content:
@@ -45,9 +61,70 @@ def aware_post(session: requests.Session, url: str, data: dict) -> Any:
     return None
 
 
+def _login_response_json(resp: requests.Response) -> Any:
+    if not resp.content:
+        return None
+    try:
+        return resp.json()
+    except Exception:
+        return None
+
+
 def do_login(session: requests.Session, host: str, username: str, password: str) -> Any:
-    login_url = host.rstrip("/") + "/api/v1/dologin"
-    return aware_post(session, login_url, {"username": username, "password": password})
+    """
+    POST credentials to Alta. Tries /api/v1/dologin first (faces.py / most scripts),
+    then /api/v1/login (used on some cloud deployments). Override with ALTA_LOGIN_PATH.
+    """
+    apply_alta_session_defaults(session)
+    base = host.rstrip("/")
+    cred = {"username": username, "password": password}
+
+    custom = (os.environ.get("ALTA_LOGIN_PATH") or "").strip()
+    if custom:
+        paths = [custom if custom.startswith("/") else "/" + custom]
+    else:
+        paths = ["/api/v1/dologin", "/api/v1/login"]
+
+    last: requests.Response | None = None
+    for path in paths:
+        url = base + path
+        resp = session.post(url, json=cred, timeout=60)
+        last = resp
+        if resp.status_code == 200:
+            return _login_response_json(resp)
+        # Try alternate path only for default pair (401/404 on first hop).
+        if (
+            not custom
+            and path == "/api/v1/dologin"
+            and resp.status_code in (401, 404)
+            and len(paths) > 1
+        ):
+            continue
+        resp.raise_for_status()
+
+    if last is not None:
+        last.raise_for_status()
+    raise requests.HTTPError("Login failed: no response")
+
+
+def _http_error_payload(exc: requests.HTTPError) -> tuple[dict, int]:
+    """Build JSON body and HTTP status for upstream Alta errors."""
+    resp = exc.response
+    detail: Any = ""
+    if resp is not None:
+        try:
+            detail = resp.json()
+        except Exception:
+            detail = (resp.text or "")[:800]
+    code = resp.status_code if resp is not None else 502
+    msg = str(exc)
+    if code == 401 and resp is not None and "login" in (resp.url or "").lower():
+        msg = (
+            "Alta rejected login (401 Unauthorized). "
+            "Use the same username and password as the Alta web UI (often your full email); "
+            "check proxy/.env for typos or trailing spaces after ALTA_PASSWORD."
+        )
+    return {"ok": False, "error": msg, "detail": detail, "upstream_status": code}, 502
 
 
 def list_face_watchlists(session: requests.Session, host: str):
@@ -311,13 +388,8 @@ def api_enroll():
     try:
         result = enroll(profile_name, str(image), watchlist_name)
     except requests.HTTPError as e:
-        detail = ""
-        if e.response is not None:
-            try:
-                detail = e.response.json()
-            except Exception:
-                detail = (e.response.text or "")[:500]
-        return jsonify({"ok": False, "error": str(e), "detail": detail}), 502
+        body, status = _http_error_payload(e)
+        return jsonify(body), status
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -345,13 +417,9 @@ def api_patients_profiles():
         do_login(session, HOST, USERNAME, PASSWORD)
         result = collect_patients_profile_rows(session, HOST, watchlist)
     except requests.HTTPError as e:
-        detail = ""
-        if e.response is not None:
-            try:
-                detail = e.response.json()
-            except Exception:
-                detail = (e.response.text or "")[:500]
-        return jsonify({"ok": False, "error": str(e), "detail": detail, "profiles": []}), 502
+        body, status = _http_error_payload(e)
+        body["profiles"] = []
+        return jsonify(body), status
     except Exception as e:
         return jsonify({"ok": False, "error": str(e), "profiles": []}), 500
 
