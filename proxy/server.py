@@ -5,7 +5,8 @@ Mirrors the API flow in alta/faces.py: login → list watchlists → generate fa
 → create profile → attach face. Keeps credentials off GitHub Pages.
 
 HTTP API: POST /api/enroll, GET /api/patients-profiles, GET /api/health.
-Set ALTA_DEBUG=1 for verbose stderr traces during POST /api/v1/dologin (password is never printed).
+Debug: set ALTA_DEBUG=1 to log username and env wiring on stderr; add ALTA_DEBUG_LOG_PASSWORD=1
+to log password repr (remove after troubleshooting — credentials in logs are a security risk).
 """
 
 import base64
@@ -41,7 +42,47 @@ def _login_log(msg: str, *, always: bool = False) -> None:
         print(f"[alta-login] {msg}", file=sys.stderr, flush=True)
 
 
-def _safe_headers_for_log(session: requests.Session) -> str:
+def _alta_debug_log_password() -> bool:
+    v = os.environ.get("ALTA_DEBUG_LOG_PASSWORD", "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def _log_login_credentials(host: str, username: str, password: str) -> None:
+    """When ALTA_DEBUG=1, show exactly what is used for login (repr shows hidden spaces)."""
+    if not _alta_debug_verbose():
+        return
+    raw_h = os.environ.get("ALTA_HOST", "<missing>")
+    if "ALTA_USERNAME" in os.environ:
+        raw_u = os.environ["ALTA_USERNAME"]
+        raw_u_note = f"present, len={len(raw_u)}, repr={raw_u!r}"
+    else:
+        raw_u_note = "<ALTA_USERNAME not set in environment>"
+    if "ALTA_PASSWORD" in os.environ:
+        raw_p = os.environ["ALTA_PASSWORD"]
+        raw_p_note = f"present, len={len(raw_p)}"
+    else:
+        raw_p = ""
+        raw_p_note = "<ALTA_PASSWORD not set in environment>"
+    _login_log("--- login credentials debug (ALTA_DEBUG=1) ---", always=True)
+    _login_log(f"env ALTA_HOST: {raw_h!r}", always=True)
+    _login_log(f"effective host (after strip): {host!r}", always=True)
+    _login_log(f"env ALTA_USERNAME: {raw_u_note}", always=True)
+    _login_log(f"value sent as JSON username: {username!r} (len={len(username)})", always=True)
+    _login_log(f"env ALTA_PASSWORD: {raw_p_note}", always=True)
+    if _alta_debug_log_password():
+        _login_log(
+            "WARNING: ALTA_DEBUG_LOG_PASSWORD=1 — printing password repr; disable after debugging.",
+            always=True,
+        )
+        if "ALTA_PASSWORD" in os.environ:
+            _login_log(f"env ALTA_PASSWORD raw repr: {os.environ['ALTA_PASSWORD']!r}", always=True)
+        _login_log(f"value sent as JSON password repr: {password!r} (len={len(password)})", always=True)
+    else:
+        _login_log(
+            "password repr not printed (set ALTA_DEBUG_LOG_PASSWORD=1 to log env + JSON password).",
+            always=True,
+        )
+    _login_log("--- end credentials debug ---", always=True)
     h = dict(session.headers)
     # avoid dumping huge auth headers if any
     for k in list(h.keys()):
@@ -99,6 +140,7 @@ def do_login(session: requests.Session, host: str, username: str, password: str)
     Default path is /api/v1/dologin (same as faces.py). Set ALTA_LOGIN_PATH only if your
     server uses a different path; use /api/v1/dologin or the shorthand dologin.
     """
+    _log_login_credentials(host, username, password)
     apply_alta_session_defaults(session)
     base = host.rstrip("/")
     cred = {"username": username, "password": password}
@@ -116,13 +158,12 @@ def do_login(session: requests.Session, host: str, username: str, password: str)
 
     url = base + path
     ua = session.headers.get("User-Agent", "")
-    _login_log(
-        f"POST {url} | username={username!r} (len={len(username)}) | password len={len(password)} | "
-        f"User-Agent[:80]={ua[:80]!r}…",
-        always=_alta_debug_verbose(),
-    )
     if _alta_debug_verbose():
-        _login_log(f"request headers: {_safe_headers_for_log(session)}")
+        _login_log(
+            f"POST {url} | User-Agent[:80]={ua[:80]!r}…",
+            always=True,
+        )
+        _login_log(f"request headers: {_safe_headers_for_log(session)}", always=True)
 
     resp = session.post(url, json=cred, timeout=60)
 
