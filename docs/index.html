@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Patients watchlist — webcam enroll</title>
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <header class="hero">
+        <h1>Patients watchlist</h1>
+        <p class="lede">
+          Capture a face with your webcam and add it as a profile on the Alta Video watchlist named
+          <strong>patients</strong>. The browser talks to a small proxy you run locally (or deploy); credentials never
+          live in this static site.
+        </p>
+      </header>
+
+      <section class="panel">
+        <h2>Proxy URL</h2>
+        <p class="hint">
+          Default is for local development. After you start <code>python server.py</code> in <code>proxy/</code>, keep
+          this pointed at <code>http://127.0.0.1:8765</code>.
+        </p>
+        <label class="field">
+          <span>API base</span>
+          <input type="url" id="proxyBase" placeholder="http://127.0.0.1:8765" autocomplete="off" />
+        </label>
+        <button type="button" class="btn secondary" id="saveProxy">Save</button>
+        <p id="healthStatus" class="status muted" aria-live="polite"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Profile</h2>
+        <label class="field">
+          <span>Display name</span>
+          <input type="text" id="profileName" placeholder="e.g. Jane Doe" maxlength="120" />
+        </label>
+      </section>
+
+      <section class="panel">
+        <h2>Camera</h2>
+        <div class="video-row">
+          <video id="video" playsinline autoplay muted></video>
+          <canvas id="canvas" hidden></canvas>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn" id="startCam">Start camera</button>
+          <button type="button" class="btn" id="capture" disabled>Capture &amp; add to patients</button>
+        </div>
+        <p id="camStatus" class="status muted" aria-live="polite"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Result</h2>
+        <pre id="result" class="log" aria-live="polite"></pre>
+      </section>
+    </main>
+    <script src="js/app.js" type="module"></script>
+  </body>
+</html>
