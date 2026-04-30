@@ -72,39 +72,30 @@ def _login_response_json(resp: requests.Response) -> Any:
 
 def do_login(session: requests.Session, host: str, username: str, password: str) -> Any:
     """
-    POST credentials to Alta. Tries /api/v1/dologin first (faces.py / most scripts),
-    then /api/v1/login (used on some cloud deployments). Override with ALTA_LOGIN_PATH.
+    POST JSON {"username", "password"} to Alta login.
+
+    Default path is /api/v1/dologin (same as faces.py). Set ALTA_LOGIN_PATH only if your
+    server uses a different path; use /api/v1/dologin or the shorthand dologin.
     """
     apply_alta_session_defaults(session)
     base = host.rstrip("/")
     cred = {"username": username, "password": password}
 
-    custom = (os.environ.get("ALTA_LOGIN_PATH") or "").strip()
-    if custom:
-        paths = [custom if custom.startswith("/") else "/" + custom]
+    raw = (os.environ.get("ALTA_LOGIN_PATH") or "").strip()
+    if raw:
+        if raw.startswith("/"):
+            path = raw
+        elif "/" not in raw:
+            path = "/api/v1/" + raw
+        else:
+            path = "/" + raw.lstrip("/")
     else:
-        paths = ["/api/v1/dologin", "/api/v1/login"]
+        path = "/api/v1/dologin"
 
-    last: requests.Response | None = None
-    for path in paths:
-        url = base + path
-        resp = session.post(url, json=cred, timeout=60)
-        last = resp
-        if resp.status_code == 200:
-            return _login_response_json(resp)
-        # Try alternate path only for default pair (401/404 on first hop).
-        if (
-            not custom
-            and path == "/api/v1/dologin"
-            and resp.status_code in (401, 404)
-            and len(paths) > 1
-        ):
-            continue
-        resp.raise_for_status()
-
-    if last is not None:
-        last.raise_for_status()
-    raise requests.HTTPError("Login failed: no response")
+    url = base + path
+    resp = session.post(url, json=cred, timeout=60)
+    resp.raise_for_status()
+    return _login_response_json(resp)
 
 
 def _http_error_payload(exc: requests.HTTPError) -> tuple[dict, int]:
