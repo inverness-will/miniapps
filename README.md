@@ -39,9 +39,9 @@ Either open `docs/index.html` in a browser (some browsers restrict `file://` cam
 cd docs && python3 -m http.server 8080
 ```
 
-Then visit `http://127.0.0.1:8080` and set **API base** to `http://127.0.0.1:8765` if it is not already.
+Then visit `http://127.0.0.1:8080`. The page calls the proxy at `http://127.0.0.1:8765` automatically when the hostname is `localhost` or `127.0.0.1`. For other hosts, it uses **same-origin** URLs (put a reverse proxy in front so `/api/*` reaches Flask, or edit `apiBase()` in `docs/js/app.js`).
 
-Use **Start camera**, enter a **Display name**, then **Capture & add to patients**.
+Use **Start camera**, enter a **Profile name**, then **Capture & add**. The right column lists profiles on the **patients** watchlist (`GET /api/patients-profiles` on the proxy).
 
 ## Publish to GitHub
 
@@ -62,7 +62,7 @@ git push -u origin main
 
 After a minute, the site is at `https://YOUR_USER.github.io/YOUR_REPO/`.
 
-**Important:** Pages users still need a reachable proxy (VPN, office network, or a small host you deploy with **HTTPS** and secrets). Point **API base** in the UI to that URL.
+**Important:** GitHub Pages still needs a reachable proxy (VPN, office network, or a small host with **HTTPS** and secrets). The UI uses same-origin `/api/...` when not on localhost; serve the static files and proxy under one HTTPS origin (reverse proxy), or change `apiBase()` in `docs/js/app.js`.
 
 Browsers often **block** an `https://*.github.io` page from calling `http://127.0.0.1` (mixed content / private network rules). For day-to-day use on one PC, run the static `docs/` site over HTTP as well (see above with `python3 -m http.server`) while the proxy runs on `127.0.0.1:8765`. For use **from** the hosted GitHub Pages URL, deploy the proxy behind **HTTPS** (for example a small VPS with a reverse proxy and Let’s Encrypt).
 

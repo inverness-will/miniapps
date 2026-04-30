@@ -3,6 +3,8 @@
 Local or server-side proxy for Alta Video face watchlist enrollment.
 Mirrors the API flow in alta/faces.py: login → list watchlists → generate face
 → create profile → attach face. Keeps credentials off GitHub Pages.
+
+HTTP API: POST /api/enroll, GET /api/patients-profiles, GET /api/health.
 """
 
 import base64
@@ -94,6 +96,93 @@ def find_watchlist_id(watchlists: list, name_query: str) -> tuple[str | None, st
             if wid:
                 return str(wid), name
     return None, None
+
+
+def find_watchlist_dict(watchlists: list, wl_id: str) -> dict | None:
+    for wl in watchlists:
+        wid = wl.get("id") or wl.get("watchlistId") or wl.get("guid")
+        if wid is not None and str(wid) == str(wl_id):
+            return wl
+    return None
+
+
+def _profiles_from_response(data: Any) -> list:
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        out = (
+            data.get("profiles")
+            or data.get("watchlistsProfiles")
+            or data.get("items")
+            or data.get("data")
+            or []
+        )
+        return out if isinstance(out, list) else []
+    return []
+
+
+def list_all_profiles(session: requests.Session, host: str) -> tuple[str | None, list]:
+    base = host.rstrip("/")
+    candidates = ["/api/v1/watchlistsProfiles", "/api/v1/watchlists-profiles"]
+    for path in candidates:
+        url = base + path
+        try:
+            data = aware_get(session, url)
+            if data is not None:
+                profiles = _profiles_from_response(data)
+                return path, profiles
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                continue
+            raise
+    return None, []
+
+
+def collect_patients_profile_rows(
+    session: requests.Session, host: str, watchlist_name: str | None
+) -> dict:
+    """Resolve watchlist + profile IDs + names for the patients (or named) watchlist."""
+    wl_query = (watchlist_name or DEFAULT_WATCHLIST or "patients").strip().lower()
+    _endpoint, data = list_face_watchlists(session, host)
+    watchlists = _watchlists_from_response(data or [])
+    wl_id, wl_display = find_watchlist_id(watchlists, wl_query)
+    if not wl_id:
+        names = [w.get("name") or w.get("title") or "?" for w in watchlists[:20]]
+        return {
+            "ok": False,
+            "error": f"No watchlist named '{wl_query}'. Sample names: {names}",
+            "profiles": [],
+        }
+
+    wl_row = find_watchlist_dict(watchlists, wl_id) or {}
+    raw_ids = wl_row.get("profile_ids") or wl_row.get("profileIds") or []
+    if not isinstance(raw_ids, list):
+        raw_ids = []
+    pids_set = {str(p) for p in raw_ids if p is not None}
+
+    prof_path, all_profiles = list_all_profiles(session, host)
+    id_to_name: dict[str, str] = {}
+    for p in all_profiles:
+        if not isinstance(p, dict):
+            continue
+        pid = p.get("id") or p.get("profileId") or p.get("guid")
+        if not pid:
+            continue
+        pid_s = str(pid)
+        nm = p.get("name") or p.get("title") or pid_s
+        id_to_name[pid_s] = str(nm)
+        wls = p.get("watchlists") or p.get("watchlist_ids") or p.get("watchlistIds") or []
+        if isinstance(wls, list) and str(wl_id) in {str(x) for x in wls}:
+            pids_set.add(pid_s)
+
+    profiles = [{"id": pid, "name": id_to_name.get(pid, pid)} for pid in sorted(pids_set, key=lambda x: (len(x), x))]
+    return {
+        "ok": True,
+        "watchlist_id": wl_id,
+        "watchlist_name": wl_display,
+        "profiles": profiles,
+        "profiles_endpoint": prof_path,
+    }
 
 
 def parse_data_url(data_url: str) -> tuple[bytes, str]:
@@ -231,6 +320,40 @@ def api_enroll():
         return jsonify({"ok": False, "error": str(e), "detail": detail}), 502
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+    status = 200 if result.get("ok") else 422
+    return jsonify(result), status
+
+
+@app.route("/api/patients-profiles", methods=["GET"])
+def api_patients_profiles():
+    """List profiles on the configured patients watchlist (query ?watchlist=name optional)."""
+    watchlist = request.args.get("watchlist") or DEFAULT_WATCHLIST or "patients"
+    if not HOST or not USERNAME or not PASSWORD:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "Server missing ALTA_HOST, ALTA_USERNAME, or ALTA_PASSWORD.",
+                    "profiles": [],
+                }
+            ),
+            503,
+        )
+    try:
+        session = requests.Session()
+        do_login(session, HOST, USERNAME, PASSWORD)
+        result = collect_patients_profile_rows(session, HOST, watchlist)
+    except requests.HTTPError as e:
+        detail = ""
+        if e.response is not None:
+            try:
+                detail = e.response.json()
+            except Exception:
+                detail = (e.response.text or "")[:500]
+        return jsonify({"ok": False, "error": str(e), "detail": detail, "profiles": []}), 502
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "profiles": []}), 500
 
     status = 200 if result.get("ok") else 422
     return jsonify(result), status
