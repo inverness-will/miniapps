@@ -83,6 +83,9 @@ def _log_login_credentials(host: str, username: str, password: str) -> None:
             always=True,
         )
     _login_log("--- end credentials debug ---", always=True)
+
+
+def _safe_headers_for_log(session: requests.Session) -> str:
     h = dict(session.headers)
     # avoid dumping huge auth headers if any
     for k in list(h.keys()):
