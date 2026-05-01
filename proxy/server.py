@@ -4,7 +4,7 @@ Local or server-side proxy for Alta Video face watchlist enrollment.
 Mirrors the API flow in alta/faces.py: login → list watchlists → generate face
 → create profile → attach face. Keeps credentials off GitHub Pages.
 
-HTTP API: POST /api/enroll, GET /api/patients-profiles, GET /api/health.
+HTTP API: POST /api/enroll, GET /api/patients-profiles, DELETE /api/profile/<id>, GET /api/health.
 Debug: set ALTA_DEBUG=1 to log username and env wiring on stderr; add ALTA_DEBUG_LOG_PASSWORD=1
 to log password repr (remove after troubleshooting — credentials in logs are a security risk).
 """
@@ -125,6 +125,12 @@ def aware_post(session: requests.Session, url: str, data: dict) -> Any:
     if resp.content:
         return resp.json()
     return None
+
+
+def aware_delete(session: requests.Session, url: str) -> None:
+    apply_alta_session_defaults(session)
+    resp = session.delete(url, timeout=60)
+    resp.raise_for_status()
 
 
 def _login_response_json(resp: requests.Response) -> Any:
@@ -304,10 +310,144 @@ def list_all_profiles(session: requests.Session, host: str) -> tuple[str | None,
     return None, []
 
 
+def parse_data_url(data_url: str) -> tuple[bytes, str]:
+    """
+    Accept raw base64 or data URL like data:image/jpeg;base64,XXXX.
+    Returns (raw_bytes, format_string for Alta API e.g. image/jpeg;base64).
+    """
+    s = (data_url or "").strip()
+    if s.startswith("data:"):
+        m = re.match(r"data:image/(jpeg|jpg|png);base64,(.+)", s, re.I | re.DOTALL)
+        if not m:
+            raise ValueError("Expected data:image/jpeg;base64,... or data:image/png;base64,...")
+        kind = m.group(1).lower()
+        b64 = m.group(2).replace("\n", "").replace("\r", "")
+        raw = base64.b64decode(b64, validate=True)
+        fmt = "image/jpeg;base64" if kind in ("jpeg", "jpg") else "image/png;base64"
+        return raw, fmt
+    raw = base64.b64decode(s, validate=True)
+    return raw, "image/jpeg;base64"
+
+
+def _get_bytes_if_image_response(session: requests.Session, url: str) -> tuple[bytes | None, str | None]:
+    apply_alta_session_defaults(session)
+    try:
+        r = session.get(url, timeout=60)
+    except requests.RequestException:
+        return None, None
+    if r.status_code != 200 or not r.content:
+        return None, None
+    ct = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+    if ct.startswith("image/"):
+        return r.content, ct
+    return None, None
+
+
+def _image_from_obj_strings(obj: dict) -> tuple[bytes | None, str | None]:
+    """Parse image bytes from common JSON fields (data URLs or raw base64)."""
+    for key in (
+        "thumbnail",
+        "thumbnailUrl",
+        "image",
+        "imageUrl",
+        "portrait",
+        "portraitUrl",
+        "avatar",
+        "photo",
+        "preview",
+        "source_image",
+        "sourceImage",
+        "face_image",
+    ):
+        val = obj.get(key)
+        if not isinstance(val, str) or not val.strip():
+            continue
+        v = val.strip()
+        if v.startswith("data:image"):
+            try:
+                raw, fmt = parse_data_url(v)
+                mime = "image/jpeg" if "jpeg" in fmt or "jpg" in fmt else "image/png"
+                return raw, mime
+            except Exception:
+                continue
+        if v.startswith("http"):
+            continue
+        if len(v) > 80:
+            try:
+                raw = base64.b64decode(v, validate=False)
+            except Exception:
+                continue
+            if len(raw) >= 32:
+                return raw, "image/jpeg"
+    return None, None
+
+
+def _profile_thumbnail_data_url(
+    session: requests.Session, host: str, profile_id: str, profile_list_row: dict | None
+) -> str | None:
+    """Best-effort face thumbnail as data URL for UI."""
+    base = host.rstrip("/")
+    max_bytes = 400_000
+    for suffix in ("/image", "/thumbnail", "/photo", "/picture", "/portrait"):
+        raw, mime = _get_bytes_if_image_response(
+            session, f"{base}/api/v1/watchlistsProfiles/{profile_id}{suffix}"
+        )
+        if raw and len(raw) <= max_bytes:
+            b64 = base64.b64encode(raw).decode("ascii")
+            return f"data:{mime};base64,{b64}"
+    for dpath in (
+        f"/api/v1/watchlistsProfiles/{profile_id}",
+        f"/api/v1/watchlists-profiles/{profile_id}",
+    ):
+        apply_alta_session_defaults(session)
+        try:
+            r = session.get(base + dpath, timeout=60)
+        except requests.RequestException:
+            continue
+        if r.status_code != 200 or not r.content:
+            continue
+        try:
+            j = r.json()
+        except Exception:
+            continue
+        if not isinstance(j, dict):
+            continue
+        raw, mime = _image_from_obj_strings(j)
+        if raw and len(raw) <= max_bytes:
+            b64 = base64.b64encode(raw).decode("ascii")
+            return f"data:{mime};base64,{b64}"
+        for nest_key in ("face", "faces", "primaryFace"):
+            nest = j.get(nest_key)
+            if isinstance(nest, dict):
+                raw, mime = _image_from_obj_strings(nest)
+                if raw and len(raw) <= max_bytes:
+                    b64 = base64.b64encode(raw).decode("ascii")
+                    return f"data:{mime};base64,{b64}"
+            if isinstance(nest, list) and nest and isinstance(nest[0], dict):
+                raw, mime = _image_from_obj_strings(nest[0])
+                if raw and len(raw) <= max_bytes:
+                    b64 = base64.b64encode(raw).decode("ascii")
+                    return f"data:{mime};base64,{b64}"
+        host_tail = host.split("//", 1)[-1].split("/")[0]
+        for _key, val in j.items():
+            if isinstance(val, str) and val.startswith("https://") and host_tail in val:
+                u = val.split("?", 1)[0]
+                raw, mime = _get_bytes_if_image_response(session, u)
+                if raw and len(raw) <= max_bytes:
+                    b64 = base64.b64encode(raw).decode("ascii")
+                    return f"data:{mime};base64,{b64}"
+    if profile_list_row and isinstance(profile_list_row, dict):
+        raw, mime = _image_from_obj_strings(profile_list_row)
+        if raw and len(raw) <= max_bytes:
+            b64 = base64.b64encode(raw).decode("ascii")
+            return f"data:{mime};base64,{b64}"
+    return None
+
+
 def collect_patients_profile_rows(
     session: requests.Session, host: str, watchlist_name: str | None
 ) -> dict:
-    """Resolve watchlist + profile IDs + names for the patients (or named) watchlist."""
+    """Resolve watchlist + profile IDs + names + thumbnails for the patients (or named) watchlist."""
     wl_query = (watchlist_name or DEFAULT_WATCHLIST or "patients").strip().lower()
     _endpoint, data = list_face_watchlists(session, host)
     watchlists = _watchlists_from_response(data or [])
@@ -328,6 +468,7 @@ def collect_patients_profile_rows(
 
     prof_path, all_profiles = list_all_profiles(session, host)
     id_to_name: dict[str, str] = {}
+    id_to_profile: dict[str, dict] = {}
     for p in all_profiles:
         if not isinstance(p, dict):
             continue
@@ -340,8 +481,16 @@ def collect_patients_profile_rows(
         wls = p.get("watchlists") or p.get("watchlist_ids") or p.get("watchlistIds") or []
         if isinstance(wls, list) and str(wl_id) in {str(x) for x in wls}:
             pids_set.add(pid_s)
+        if pid_s in pids_set:
+            id_to_profile[pid_s] = p
 
-    profiles = [{"id": pid, "name": id_to_name.get(pid, pid)} for pid in sorted(pids_set, key=lambda x: (len(x), x))]
+    profiles = []
+    for pid in sorted(pids_set, key=lambda x: (len(x), x)):
+        name = id_to_name.get(pid, pid)
+        prow = id_to_profile.get(pid)
+        thumb = _profile_thumbnail_data_url(session, host, pid, prow)
+        profiles.append({"id": pid, "name": name, "thumbnail_data_url": thumb})
+
     return {
         "ok": True,
         "watchlist_id": wl_id,
@@ -349,25 +498,6 @@ def collect_patients_profile_rows(
         "profiles": profiles,
         "profiles_endpoint": prof_path,
     }
-
-
-def parse_data_url(data_url: str) -> tuple[bytes, str]:
-    """
-    Accept raw base64 or data URL like data:image/jpeg;base64,XXXX.
-    Returns (raw_bytes, format_string for Alta API e.g. image/jpeg;base64).
-    """
-    s = (data_url or "").strip()
-    if s.startswith("data:"):
-        m = re.match(r"data:image/(jpeg|jpg|png);base64,(.+)", s, re.I | re.DOTALL)
-        if not m:
-            raise ValueError("Expected data:image/jpeg;base64,... or data:image/png;base64,...")
-        kind = m.group(1).lower()
-        b64 = m.group(2).replace("\n", "").replace("\r", "")
-        raw = base64.b64decode(b64, validate=True)
-        fmt = "image/jpeg;base64" if kind in ("jpeg", "jpg") else "image/png;base64"
-        return raw, fmt
-    raw = base64.b64decode(s, validate=True)
-    return raw, "image/jpeg;base64"
 
 
 def generate_face(session: requests.Session, host: str, image_bytes: bytes, fmt: str) -> dict | None:
@@ -514,6 +644,39 @@ def api_patients_profiles():
 
     status = 200 if result.get("ok") else 422
     return jsonify(result), status
+
+
+@app.route("/api/profile/<profile_id>", methods=["DELETE"])
+def api_delete_profile(profile_id: str):
+    """Remove a face profile (DELETE on Alta). Only allowed if profile is on the named watchlist."""
+    watchlist = request.args.get("watchlist") or DEFAULT_WATCHLIST or "patients"
+    if not HOST or not USERNAME or not PASSWORD:
+        return jsonify({"ok": False, "error": "Server missing ALTA_HOST, ALTA_USERNAME, or ALTA_PASSWORD."}), 503
+    try:
+        session = requests.Session()
+        do_login(session, HOST, USERNAME, PASSWORD)
+        info = collect_patients_profile_rows(session, HOST, watchlist)
+        if not info.get("ok"):
+            return jsonify({"ok": False, "error": info.get("error", "Could not verify watchlist.")}), 422
+        allowed = {str(p.get("id")) for p in info.get("profiles", []) if p.get("id")}
+        if str(profile_id) not in allowed:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "Profile is not on this watchlist; delete not allowed.",
+                    }
+                ),
+                403,
+            )
+        url = f"{HOST}/api/v1/watchlistsProfiles/{profile_id}"
+        aware_delete(session, url)
+        return jsonify({"ok": True, "profile_id": profile_id})
+    except requests.HTTPError as e:
+        body, status = _http_error_payload(e)
+        return jsonify(body), status
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 def main():

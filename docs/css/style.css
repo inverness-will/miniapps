@@ -265,14 +265,52 @@ video {
 
 .profile-row {
   display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.75rem;
   padding: 0.65rem 0.85rem;
   border-bottom: 1px solid var(--border);
 }
 
-.profile-row:last-child {
-  border-bottom: none;
+.profile-thumb-wrap {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+}
+
+.profile-thumb-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 1;
+}
+
+.profile-thumb-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--muted);
+  z-index: 0;
+}
+
+.profile-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.profile-actions {
+  flex-shrink: 0;
 }
 
 .profile-name {
@@ -280,10 +318,20 @@ video {
   font-size: 0.9rem;
 }
 
-.profile-id {
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 0.72rem;
-  color: var(--muted);
+.btn-danger {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid rgba(255, 107, 107, 0.45);
+  font-size: 0.8rem;
+  padding: 0.35rem 0.65rem;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: rgba(255, 107, 107, 0.12);
+}
+
+.profile-row:last-child {
+  border-bottom: none;
 }
 
 .profile-empty {

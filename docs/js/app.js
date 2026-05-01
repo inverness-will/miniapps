@@ -32,6 +32,45 @@ function setEnrollMessage(text, kind) {
   enrollStatus.className = "inline-status enroll-line" + (kind ? ` ${kind}` : "");
 }
 
+function initialsFromName(name) {
+  const s = (name || "?").trim();
+  if (!s) return "?";
+  const parts = s.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+  return s.slice(0, 2).toUpperCase();
+}
+
+async function removeProfile(profileId, displayName) {
+  const label = displayName || profileId;
+  if (
+    !confirm(
+      `Remove "${label}" from the patients watchlist?\n\nThis deletes the face profile in Alta (same as delete_face_profiles.py).`
+    )
+  ) {
+    return;
+  }
+  listStatus.textContent = "Removing…";
+  listStatus.className = "list-foot";
+  try {
+    const res = await fetch(
+      `${apiBase()}/api/profile/${encodeURIComponent(profileId)}?watchlist=patients`,
+      { method: "DELETE" }
+    );
+    const data = await res.json().catch(() => ({ ok: false, error: "Invalid JSON from server" }));
+    if (!data.ok) {
+      listStatus.textContent = data.error || "Delete failed.";
+      listStatus.className = "list-foot err";
+      return;
+    }
+    await loadProfiles();
+  } catch (e) {
+    listStatus.textContent = e.message || String(e);
+    listStatus.className = "list-foot err";
+  }
+}
+
 async function loadProfiles() {
   profileList.innerHTML = "";
   listStatus.textContent = "Loading…";
@@ -57,14 +96,50 @@ async function loadProfiles() {
     for (const row of rows) {
       const li = document.createElement("li");
       li.className = "profile-row";
-      const name = document.createElement("span");
-      name.className = "profile-name";
-      name.textContent = row.name || row.id;
-      const idSpan = document.createElement("span");
-      idSpan.className = "profile-id";
-      idSpan.textContent = row.id;
-      li.appendChild(name);
-      li.appendChild(idSpan);
+
+      const thumbWrap = document.createElement("div");
+      thumbWrap.className = "profile-thumb-wrap";
+      const initials = document.createElement("span");
+      initials.className = "profile-thumb-fallback";
+      initials.textContent = initialsFromName(row.name || row.id);
+      thumbWrap.appendChild(initials);
+
+      if (row.thumbnail_data_url) {
+        const img = document.createElement("img");
+        img.className = "profile-thumb-img";
+        img.alt = "";
+        img.loading = "lazy";
+        img.src = row.thumbnail_data_url;
+        img.addEventListener("load", () => {
+          initials.style.display = "none";
+        });
+        img.addEventListener("error", () => {
+          img.remove();
+        });
+        thumbWrap.appendChild(img);
+      }
+
+      const meta = document.createElement("div");
+      meta.className = "profile-meta";
+      const nameEl = document.createElement("div");
+      nameEl.className = "profile-name";
+      nameEl.textContent = row.name || row.id;
+      meta.appendChild(nameEl);
+
+      const actions = document.createElement("div");
+      actions.className = "profile-actions";
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "btn btn-danger";
+      delBtn.textContent = "Remove";
+      delBtn.addEventListener("click", () => {
+        void removeProfile(row.id, row.name);
+      });
+      actions.appendChild(delBtn);
+
+      li.appendChild(thumbWrap);
+      li.appendChild(meta);
+      li.appendChild(actions);
       profileList.appendChild(li);
     }
   } catch (e) {
@@ -108,7 +183,7 @@ async function enroll(dataUrl) {
     setCamMessage(data.error || "Enrollment failed.", "err");
     return;
   }
-  setEnrollMessage(`Added: ${data.profile_name} (${data.profile_id})`, "ok");
+  setEnrollMessage(`Added: ${data.profile_name}`, "ok");
   setCamMessage("Added to patients watchlist.", "ok");
   await loadProfiles();
 }
