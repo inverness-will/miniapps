@@ -343,58 +343,197 @@ def _get_bytes_if_image_response(session: requests.Session, url: str) -> tuple[b
     return None, None
 
 
+_JPEG = b"\xff\xd8\xff"
+_PNG = b"\x89PNG\r\n\x1a\n"
+
+
+def _decode_photo_string(s: str) -> tuple[bytes | None, str | None]:
+    """Decode data URL or raw base64; return None if not a JPEG/PNG blob."""
+    s = (s or "").strip()
+    if not s:
+        return None, None
+    if s.startswith("data:image"):
+        try:
+            raw, fmt = parse_data_url(s)
+            mime = "image/jpeg" if "jpeg" in fmt or "jpg" in fmt else "image/png"
+            return raw, mime
+        except Exception:
+            return None, None
+    if len(s) < 120:
+        return None, None
+    try:
+        raw = base64.b64decode(s, validate=False)
+    except Exception:
+        return None, None
+    if len(raw) < 200:
+        return None, None
+    if raw[:3] == _JPEG[:3]:
+        return raw, "image/jpeg"
+    if raw[:8] == _PNG:
+        return raw, "image/png"
+    return None, None
+
+
 def _image_from_obj_strings(obj: dict) -> tuple[bytes | None, str | None]:
-    """Parse image bytes from common JSON fields (data URLs or raw base64)."""
+    """Parse image from profile/face JSON. Enrollment photos first; generic thumbnail last."""
+    best: tuple[bytes | None, str | None] = (None, None)
+    best_sz = 0
     for key in (
-        "thumbnail",
-        "thumbnailUrl",
+        "source_image",
+        "sourceImage",
+        "display_image",
+        "displayImage",
+        "full_image",
+        "fullImage",
+        "original_image",
+        "originalImage",
+        "enrollment_image",
+        "face_image",
         "image",
         "imageUrl",
         "portrait",
         "portraitUrl",
-        "avatar",
         "photo",
         "preview",
-        "source_image",
-        "sourceImage",
-        "face_image",
+        "avatar",
+        "thumbnail",
+        "thumbnailUrl",
     ):
         val = obj.get(key)
         if not isinstance(val, str) or not val.strip():
             continue
         v = val.strip()
-        if v.startswith("data:image"):
-            try:
-                raw, fmt = parse_data_url(v)
-                mime = "image/jpeg" if "jpeg" in fmt or "jpg" in fmt else "image/png"
-                return raw, mime
-            except Exception:
-                continue
         if v.startswith("http"):
             continue
-        if len(v) > 80:
-            try:
-                raw = base64.b64decode(v, validate=False)
-            except Exception:
-                continue
-            if len(raw) >= 32:
-                return raw, "image/jpeg"
-    return None, None
+        raw, mime = _decode_photo_string(v)
+        if not raw:
+            continue
+        if key in ("source_image", "sourceImage", "display_image", "displayImage", "full_image", "fullImage"):
+            min_sz = 120
+        elif key in ("thumbnail", "thumbnailUrl", "preview", "avatar"):
+            min_sz = 3500
+        else:
+            min_sz = 800
+        if len(raw) < min_sz:
+            continue
+        if len(raw) > best_sz:
+            best, best_sz = (raw, mime), len(raw)
+    return best
+
+
+def list_all_watchlists_profiles_faces(session: requests.Session, host: str) -> list:
+    """GET global face rows (includes profile_id) when the deployment exposes this list."""
+    base = host.rstrip("/")
+    for path in ("/api/v1/watchlistsProfilesFaces", "/api/v1/watchlists-profiles-faces"):
+        apply_alta_session_defaults(session)
+        try:
+            r = session.get(base + path, timeout=90)
+        except requests.RequestException:
+            continue
+        if r.status_code != 200 or not r.content:
+            continue
+        try:
+            j = r.json()
+        except Exception:
+            continue
+        rows: list = []
+        if isinstance(j, list):
+            rows = j
+        elif isinstance(j, dict):
+            rows = (
+                j.get("faces")
+                or j.get("watchlistsProfilesFaces")
+                or j.get("items")
+                or j.get("data")
+                or []
+            )
+        if isinstance(rows, list) and rows:
+            return [x for x in rows if isinstance(x, dict)]
+    return []
+
+
+def index_profile_face_photos(session: requests.Session, host: str) -> dict[str, tuple[bytes, str]]:
+    """
+    profile_id -> (image bytes, mime) from watchlistsProfilesFaces list.
+    Picks the largest valid image per profile (enrollment photo is usually the biggest).
+    """
+    rows = list_all_watchlists_profiles_faces(session, host)
+    best: dict[str, tuple[bytes, str, int]] = {}
+    for face in rows:
+        pid = face.get("profile_id") or face.get("profileId")
+        if pid is None:
+            continue
+        pid_s = str(pid)
+        raw, mime = _image_from_obj_strings(face)
+        if not raw or not mime:
+            continue
+        sz = len(raw)
+        prev = best.get(pid_s)
+        if prev is None or sz > prev[2]:
+            best[pid_s] = (raw, mime, sz)
+    return {k: (v[0], v[1]) for k, v in best.items()}
+
+
+def fetch_faces_for_profile(session: requests.Session, host: str, profile_id: str) -> list:
+    """GET face rows for a single profile (when a global list is not available)."""
+    base = host.rstrip("/")
+    for path in (
+        f"/api/v1/watchlistsProfiles/{profile_id}/faces",
+        f"/api/v1/watchlists-profiles/{profile_id}/faces",
+    ):
+        apply_alta_session_defaults(session)
+        try:
+            r = session.get(base + path, timeout=60)
+        except requests.RequestException:
+            continue
+        if r.status_code != 200 or not r.content:
+            continue
+        try:
+            j = r.json()
+        except Exception:
+            continue
+        rows: list = []
+        if isinstance(j, list):
+            rows = j
+        elif isinstance(j, dict):
+            rows = (
+                j.get("faces")
+                or j.get("watchlistsProfilesFaces")
+                or j.get("items")
+                or j.get("data")
+                or []
+            )
+        if isinstance(rows, list) and rows:
+            return [x for x in rows if isinstance(x, dict)]
+    return []
+
+
+def merge_face_photos_from_profile_endpoints(
+    session: requests.Session, host: str, face_photos: dict[str, tuple[bytes, str]], pids: set[str]
+) -> dict[str, tuple[bytes, str]]:
+    """Fill missing profile IDs using per-profile /faces responses."""
+    out = dict(face_photos)
+    for pid in pids:
+        if pid in out:
+            continue
+        rows = fetch_faces_for_profile(session, host, pid)
+        best: tuple[bytes | None, str | None] = (None, None)
+        best_sz = 0
+        for face in rows:
+            raw, mime = _image_from_obj_strings(face)
+            if raw and mime and len(raw) > best_sz:
+                best, best_sz = (raw, mime), len(raw)
+        if best[0] and best[1]:
+            out[pid] = (best[0], best[1])
+    return out
 
 
 def _profile_thumbnail_data_url(
     session: requests.Session, host: str, profile_id: str, profile_list_row: dict | None
 ) -> str | None:
-    """Best-effort face thumbnail as data URL for UI."""
+    """Fallback when watchlistsProfilesFaces list is unavailable: profile JSON / photo URLs."""
     base = host.rstrip("/")
     max_bytes = 400_000
-    for suffix in ("/image", "/thumbnail", "/photo", "/picture", "/portrait"):
-        raw, mime = _get_bytes_if_image_response(
-            session, f"{base}/api/v1/watchlistsProfiles/{profile_id}{suffix}"
-        )
-        if raw and len(raw) <= max_bytes:
-            b64 = base64.b64encode(raw).decode("ascii")
-            return f"data:{mime};base64,{b64}"
     for dpath in (
         f"/api/v1/watchlistsProfiles/{profile_id}",
         f"/api/v1/watchlists-profiles/{profile_id}",
@@ -423,11 +562,13 @@ def _profile_thumbnail_data_url(
                 if raw and len(raw) <= max_bytes:
                     b64 = base64.b64encode(raw).decode("ascii")
                     return f"data:{mime};base64,{b64}"
-            if isinstance(nest, list) and nest and isinstance(nest[0], dict):
-                raw, mime = _image_from_obj_strings(nest[0])
-                if raw and len(raw) <= max_bytes:
-                    b64 = base64.b64encode(raw).decode("ascii")
-                    return f"data:{mime};base64,{b64}"
+            if isinstance(nest, list):
+                for item in nest:
+                    if isinstance(item, dict):
+                        raw, mime = _image_from_obj_strings(item)
+                        if raw and len(raw) <= max_bytes:
+                            b64 = base64.b64encode(raw).decode("ascii")
+                            return f"data:{mime};base64,{b64}"
         host_tail = host.split("//", 1)[-1].split("/")[0]
         for _key, val in j.items():
             if isinstance(val, str) and val.startswith("https://") and host_tail in val:
@@ -436,6 +577,14 @@ def _profile_thumbnail_data_url(
                 if raw and len(raw) <= max_bytes:
                     b64 = base64.b64encode(raw).decode("ascii")
                     return f"data:{mime};base64,{b64}"
+    # Binary resources (omit /thumbnail — often not the enrollment portrait)
+    for suffix in ("/photo", "/image", "/portrait", "/picture"):
+        raw, mime = _get_bytes_if_image_response(
+            session, f"{base}/api/v1/watchlistsProfiles/{profile_id}{suffix}"
+        )
+        if raw and len(raw) <= max_bytes:
+            b64 = base64.b64encode(raw).decode("ascii")
+            return f"data:{mime};base64,{b64}"
     if profile_list_row and isinstance(profile_list_row, dict):
         raw, mime = _image_from_obj_strings(profile_list_row)
         if raw and len(raw) <= max_bytes:
@@ -484,11 +633,21 @@ def collect_patients_profile_rows(
         if pid_s in pids_set:
             id_to_profile[pid_s] = p
 
+    face_photos = index_profile_face_photos(session, host)
+    face_photos = merge_face_photos_from_profile_endpoints(session, host, face_photos, pids_set)
+
     profiles = []
     for pid in sorted(pids_set, key=lambda x: (len(x), x)):
         name = id_to_name.get(pid, pid)
         prow = id_to_profile.get(pid)
-        thumb = _profile_thumbnail_data_url(session, host, pid, prow)
+        thumb = None
+        tpl = face_photos.get(pid)
+        if tpl:
+            raw, mime = tpl
+            if len(raw) <= 400_000:
+                thumb = f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+        if not thumb:
+            thumb = _profile_thumbnail_data_url(session, host, pid, prow)
         profiles.append({"id": pid, "name": name, "thumbnail_data_url": thumb})
 
     return {
