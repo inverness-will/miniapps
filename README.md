@@ -29,7 +29,13 @@ cp .env.example .env
 python server.py
 ```
 
-Default listen address: `http://127.0.0.1:8765`.
+Default listen address: `http://127.0.0.1:8765` (loopback only). To open the site from another device or using your machine hostname in Chrome, set:
+
+```env
+PROXY_HOST=0.0.0.0
+```
+
+Then the static page on `http://THIS-HOST:8080` can reach `http://THIS-HOST:8765`.
 
 ### 2. Open the site
 
@@ -39,7 +45,22 @@ Either open `docs/index.html` in a browser (some browsers restrict `file://` cam
 cd docs && python3 -m http.server 8080
 ```
 
-Then visit `http://127.0.0.1:8080`. The page calls the proxy at `http://127.0.0.1:8765` automatically when the hostname is `localhost` or `127.0.0.1`. For other hosts, it uses **same-origin** URLs (put a reverse proxy in front so `/api/*` reaches Flask, or edit `apiBase()` in `docs/js/app.js`).
+Then visit **`http://127.0.0.1:8080`** (or **`http://localhost:8080`**) in Chrome — not `file://` — so the page can call the API and use the webcam reliably.
+
+**If you use another host or port** (e.g. `http://your-computer.local:8080` or `http://192.168.x.x:8080`), the app calls the proxy at **`http://<same-hostname>:8765`**. Set in `proxy/.env`:
+
+```env
+PROXY_HOST=0.0.0.0
+```
+
+so Flask listens on all interfaces, not only loopback.
+
+**Overrides** (bookmark-friendly):
+
+- Query: `http://localhost:8080/?api=http://127.0.0.1:8765`
+- Or in the browser console: `localStorage.setItem("patientWatchlistApiBase", "http://127.0.0.1:8765")` then reload.
+
+For **GitHub Pages** (`https://*.github.io`), the app uses same-origin `/api/...` (reverse-proxy your proxy behind that host).
 
 Use **Start camera**, enter a **Profile name**, then **Capture & add**. The right column lists profiles on the **patients** watchlist (`GET /api/patients-profiles` on the proxy).
 

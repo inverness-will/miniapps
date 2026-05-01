@@ -13,12 +13,53 @@ const refreshProfiles = $("refreshProfiles");
 
 let stream = null;
 
-/** Same host in production; local static server → Flask on 8765. */
+const LS_API_BASE = "patientWatchlistApiBase";
+
+/**
+ * Base URL for the Flask proxy (/api/*).
+ * - Cursor preview: often http://localhost:8080 → we point at http://127.0.0.1:8765
+ * - Desktop Chrome: file://, http://YOUR-HOSTNAME:8080, or http://192.168.x.x:8080 need different rules
+ * Override: ?api=http://127.0.0.1:8765 or localStorage.setItem("patientWatchlistApiBase", "http://...")
+ */
 function apiBase() {
-  const h = window.location.hostname;
-  if (h === "localhost" || h === "127.0.0.1") {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get("api");
+    if (q && /^https?:\/\//i.test(q)) {
+      return q.replace(/\/+$/, "");
+    }
+  } catch (_) {
+    /* ignore */
+  }
+  try {
+    const saved = localStorage.getItem(LS_API_BASE);
+    if (saved && /^https?:\/\//i.test(saved)) {
+      return saved.replace(/\/+$/, "");
+    }
+  } catch (_) {
+    /* private mode / blocked */
+  }
+
+  const proto = window.location.protocol;
+  const h = (window.location.hostname || "").toLowerCase();
+
+  if (proto === "file:") {
     return "http://127.0.0.1:8765";
   }
+  if (h === "localhost" || h === "127.0.0.1" || h === "[::1]") {
+    return "http://127.0.0.1:8765";
+  }
+
+  // GitHub Pages / HTTPS deployments: expect API behind same origin (reverse proxy)
+  if (h.endsWith("github.io") || proto === "https:") {
+    return "";
+  }
+
+  // Any other http://HOST:PORT (e.g. machine name or LAN IP + python http.server)
+  if (proto === "http:" && h && h !== "localhost" && h !== "127.0.0.1" && h !== "[::1]") {
+    return `http://${window.location.hostname}:8765`;
+  }
+
   return "";
 }
 
