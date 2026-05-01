@@ -26,19 +26,9 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-
-def _normalize_alta_password(value: str) -> str:
-    """Strip accidental 'PASSWORD=' prefix when the whole .env value was pasted as 'PASSWORD=secret'."""
-    v = value.strip()
-    prefix = "PASSWORD="
-    if v.startswith(prefix):
-        return v[len(prefix):].strip()
-    return v
-
-
 HOST = os.environ.get("ALTA_HOST", "").strip().rstrip("/")
 USERNAME = os.environ.get("ALTA_USERNAME", "").strip()
-PASSWORD = _normalize_alta_password(os.environ.get("ALTA_PASSWORD", ""))
+PASSWORD = os.environ.get("ALTA_PASSWORD", "").strip()
 DEFAULT_WATCHLIST = os.environ.get("WATCHLIST_NAME", "patients").strip().lower()
 
 
