@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Patients — Alta watchlist</title>
+    <link rel="stylesheet" href="css/style.css?v=8" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div class="brand-text">
+            <h1>Patient Hot List</h1>
+            <p class="tagline">High risk patient watchlist</p>
+          </div>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="col col-capture" aria-labelledby="capture-title">
+          <div class="card">
+            <div class="card-head">
+              <h2 id="capture-title">Enroll</h2>
+            </div>
+            <label class="field">
+              <span>Profile name</span>
+              <input type="text" id="profileName" placeholder="Display name" maxlength="120" autocomplete="name" />
+            </label>
+            <div class="video-wrap" id="videoWrap" role="button" tabindex="0" aria-label="Enable camera">
+              <video id="video" playsinline autoplay muted></video>
+              <div id="cameraOverlay" class="camera-overlay is-hidden">
+                <div class="camera-overlay-icon" aria-hidden="true">📷</div>
+                <div class="camera-overlay-text">Click here to enable camera</div>
+              </div>
+              <canvas id="canvas" hidden></canvas>
+            </div>
+            <div class="btn-row">
+              <button type="button" class="btn btn-primary" id="capture" disabled>Capture &amp; add</button>
+            </div>
+            <p id="camStatus" class="inline-status" aria-live="polite"></p>
+            <p id="enrollStatus" class="inline-status enroll-line" aria-live="polite"></p>
+          </div>
+        </section>
+
+        <section class="col col-roster" aria-labelledby="roster-title">
+          <div class="card card-tall">
+            <div class="card-head card-head-split">
+              <div>
+                <h2 id="roster-title">Patients watchlist</h2>
+                <p class="card-sub">Profiles on the <strong>patients</strong> watchlist</p>
+              </div>
+              <button type="button" class="btn btn-ghost" id="refreshProfiles" title="Reload from Alta">Refresh</button>
+            </div>
+            <ul id="profileList" class="profile-list"></ul>
+            <p id="listStatus" class="list-foot" aria-live="polite"></p>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="js/app.js?v=11"></script>
+  </body>
+</html>

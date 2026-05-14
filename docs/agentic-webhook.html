@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agentic Webhook Monitor</title>
+    <link rel="stylesheet" href="css/style.css?v=9" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div class="brand-text">
+            <h1>Agentic Webhook</h1>
+            <p class="tagline">Independent camera event monitor</p>
+          </div>
+        </div>
+      </header>
+      <main class="layout layout-single">
+        <section class="col">
+          <div class="card">
+            <div class="card-head card-head-split">
+              <div>
+                <h2>Webhook monitor</h2>
+                <p class="card-sub">Listening for <strong>POST /webhook</strong> camera events</p>
+              </div>
+              <button type="button" class="btn btn-ghost" id="refreshWebhookBtn">Refresh</button>
+            </div>
+            <p id="entryStatus" class="inline-status">Waiting for webhook...</p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="warning-modal is-hidden" id="entryModal" role="dialog" aria-modal="true" aria-labelledby="entryTitle" hidden>
+      <div class="warning-card">
+        <div class="warning-head">
+          <h2 id="entryTitle">AGENTIC WEBHOOK EVENT</h2>
+          <div class="warning-head-actions">
+            <p id="entryModalStatus" class="warning-status">Waiting for webhook...</p>
+            <button type="button" class="btn btn-ghost warning-clear-btn" id="clearEntryBtn" disabled>Clear event</button>
+          </div>
+        </div>
+        <div id="entryBody" class="warning-body is-hidden agentic-warning-body">
+          <div class="warning-thumbs agentic-main-viewer">
+            <div class="warning-thumb-wrap agentic-main-wrap">
+              <span id="entryFallback" class="warning-thumb-fallback">?</span>
+              <img id="entryImage" class="warning-thumb-img" alt="Webhook snapshot" />
+            </div>
+          </div>
+          <div class="warning-meta">
+            <div id="entryName" class="warning-patient">Unknown rule</div>
+            <div id="entryCamera" class="warning-location">Unknown camera</div>
+            <div id="entryEvent" class="warning-event">Camera rule triggered</div>
+            <div id="entryTime" class="warning-time"></div>
+            <div id="entryResolution" class="warning-time"></div>
+          </div>
+        </div>
+        <div id="entrySnapshots" class="warning-snapshots is-hidden">
+          <div class="warning-snapshots-title">Snapshot selector</div>
+          <div class="agentic-snapshot-selector">
+            <button type="button" class="btn btn-ghost agentic-snap-btn" id="snapSelect0">1</button>
+            <button type="button" class="btn btn-ghost agentic-snap-btn" id="snapSelect1">2</button>
+            <button type="button" class="btn btn-ghost agentic-snap-btn" id="snapSelect2">3</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="js/agentic-webhook.js?v=2"></script>
+  </body>
+</html>

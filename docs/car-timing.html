@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Car Timing</title>
+    <link rel="stylesheet" href="css/style.css?v=10" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div class="brand-text">
+            <h1>Car Timing</h1>
+            <p class="tagline">Line crossing entry/exit duration log</p>
+          </div>
+        </div>
+      </header>
+      <main class="layout layout-single">
+        <section class="col">
+          <div class="card car-timing-card">
+            <div class="card-head card-head-split">
+              <div>
+                <h2>Crossing log</h2>
+                <p class="card-sub">Webhook endpoint: <strong>/api/webhook-car-crossing</strong> with JSON fields <strong>entering</strong> and <strong>leaving</strong>.</p>
+              </div>
+              <div class="btn-row">
+                <button type="button" class="btn btn-ghost" id="clearLogBtn">Clear log</button>
+              </div>
+            </div>
+            <p class="inline-status" id="carTimingStatus">Waiting for webhook events…</p>
+            <ul class="car-timing-list" id="carTimingList">
+              <li class="car-timing-empty">No completed entry/exit pair yet.</li>
+            </ul>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="js/car-timing.js?v=1"></script>
+  </body>
+</html>

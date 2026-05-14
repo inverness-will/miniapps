@@ -3,59 +3,43 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Patients — Alta watchlist</title>
-    <link rel="stylesheet" href="css/style.css" />
+    <title>Security Operations Hub</title>
+    <link rel="stylesheet" href="css/style.css?v=10" />
   </head>
-  <body>
-    <div class="app">
-      <header class="topbar">
-        <div class="brand">
+  <body class="home-body">
+    <main class="home-shell">
+      <section class="home-card" aria-labelledby="home-title">
+        <div class="home-settings-wrap">
+          <button type="button" class="btn btn-ghost home-settings-btn" id="homeSettingsBtn" aria-label="App visibility settings">
+            ⚙
+          </button>
+        </div>
+        <div class="brand home-brand">
           <span class="brand-mark" aria-hidden="true"></span>
           <div class="brand-text">
-            <h1>Patients</h1>
-            <p class="tagline">Face capture · Alta Video watchlist</p>
+            <h1 id="home-title">Security Operations</h1>
+            <p class="tagline">Choose a workflow</p>
           </div>
         </div>
-      </header>
-
-      <main class="layout">
-        <section class="col col-capture" aria-labelledby="capture-title">
-          <div class="card">
-            <div class="card-head">
-              <h2 id="capture-title">Enroll</h2>
-            </div>
-            <label class="field">
-              <span>Profile name</span>
-              <input type="text" id="profileName" placeholder="Display name" maxlength="120" autocomplete="name" />
-            </label>
-            <div class="video-wrap">
-              <video id="video" playsinline autoplay muted></video>
-              <canvas id="canvas" hidden></canvas>
-            </div>
-            <div class="btn-row">
-              <button type="button" class="btn btn-primary" id="startCam">Start camera</button>
-              <button type="button" class="btn btn-primary" id="capture" disabled>Capture &amp; add</button>
-            </div>
-            <p id="camStatus" class="inline-status" aria-live="polite"></p>
-            <p id="enrollStatus" class="inline-status enroll-line" aria-live="polite"></p>
-          </div>
-        </section>
-
-        <section class="col col-roster" aria-labelledby="roster-title">
-          <div class="card card-tall">
-            <div class="card-head card-head-split">
-              <div>
-                <h2 id="roster-title">Patients watchlist</h2>
-                <p class="card-sub">Profiles on the <strong>patients</strong> watchlist</p>
-              </div>
-              <button type="button" class="btn btn-ghost" id="refreshProfiles" title="Reload from Alta">Refresh</button>
-            </div>
-            <ul id="profileList" class="profile-list"></ul>
-            <p id="listStatus" class="list-foot" aria-live="polite"></p>
-          </div>
-        </section>
-      </main>
+        <div class="home-actions" id="homeActions">
+          <a class="home-link-btn" data-app-id="patient-elopement" href="patient-elopement.html">Patient elopement</a>
+          <a class="home-link-btn" data-app-id="ai-alerts" href="ai-alerts.html">AI alerts</a>
+          <a class="home-link-btn" data-app-id="alta-dashboard" href="alta-dashboard.html">Alta dashboard</a>
+          <a class="home-link-btn" data-app-id="car-timing" href="car-timing.html">Car timing</a>
+          <a class="home-link-btn" data-app-id="advanced-heatmaps" href="advanced-heatmaps.html">Advanced heatmaps</a>
+          <a class="home-link-btn" data-app-id="tailgating" href="tailgating.html">Tailgating</a>
+        </div>
+      </section>
+    </main>
+    <div class="ai-alerts-modal is-hidden" id="homeSettingsModal" role="dialog" aria-modal="true" aria-labelledby="homeSettingsTitle" hidden>
+      <div class="ai-alerts-modal-card">
+        <div class="card-head card-head-split">
+          <h2 id="homeSettingsTitle">Visible mini apps</h2>
+          <button type="button" class="btn btn-ghost" id="homeSettingsCloseBtn">Close</button>
+        </div>
+        <div id="homeSettingsList" class="home-settings-list"></div>
+      </div>
     </div>
-    <script src="js/app.js"></script>
+    <script src="js/home.js?v=2"></script>
   </body>
 </html>

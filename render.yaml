@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: patient-watchlist-web
+    runtime: python
+    plan: free
+    buildCommand: pip install -r proxy/requirements.txt
+    startCommand: python proxy/server.py
+    envVars:
+      - key: PROXY_HOST
+        value: 0.0.0.0
+      - key: WATCHLIST_NAME
+        value: patients

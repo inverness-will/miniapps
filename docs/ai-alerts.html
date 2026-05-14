@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Alerts</title>
+    <link rel="stylesheet" href="css/style.css?v=10" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div class="brand-text">
+            <h1 id="ai-alerts-title">AI Alerts</h1>
+            <p class="tagline">Create and manage AI-triggered alerts</p>
+          </div>
+        </div>
+      </header>
+
+      <main class="layout layout-single">
+        <section class="col" aria-labelledby="camera-select-title">
+          <div class="card">
+            <div class="card-head card-head-split">
+              <div>
+                <h2 id="camera-select-title">Camera snapshot source</h2>
+                <p class="card-sub">Select one camera to start background live snapshots (5s cadence).</p>
+              </div>
+            </div>
+            <div class="btn-row">
+              <select id="cameraSelect" class="ai-camera-select"></select>
+              <button type="button" class="btn btn-ghost" id="openCameraPickerBtn">Camera picker</button>
+              <button type="button" class="btn btn-primary" id="startCameraSnapshotsBtn">Start snapshots</button>
+              <button type="button" class="btn btn-ghost" id="stopCameraSnapshotsBtn">Stop snapshots</button>
+            </div>
+            <p id="cameraSelectStatus" class="inline-status" aria-live="polite"></p>
+          </div>
+        </section>
+        <section class="col" aria-labelledby="ai-alerts-title">
+          <div class="card card-tall">
+            <div class="card-head card-head-split">
+              <div>
+                <h2>Configured alerts</h2>
+                <p class="card-sub">Alert prompt text is stored but not shown in this list.</p>
+              </div>
+              <div class="ai-alerts-actions">
+                <a class="btn btn-ghost" href="index.html">Home</a>
+                <button type="button" class="btn btn-primary ai-add-btn" id="addAlertBtn" aria-label="Create alert">+</button>
+              </div>
+            </div>
+            <ul id="alertsList" class="ai-alerts-list"></ul>
+            <p id="alertsStatus" class="list-foot" aria-live="polite"></p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="warning-modal is-hidden" id="entryModal" role="dialog" aria-modal="true" aria-labelledby="entryTitle" hidden>
+      <div class="warning-card">
+        <div class="warning-head">
+          <h2 id="entryTitle">AGENTIC WEBHOOK EVENT</h2>
+          <div class="warning-head-actions">
+            <p id="entryModalStatus" class="warning-status">Waiting for webhook...</p>
+            <button type="button" class="btn btn-ghost warning-clear-btn" id="clearEntryBtn" disabled>Clear event</button>
+          </div>
+        </div>
+        <div id="entryBody" class="warning-body is-hidden agentic-warning-body">
+          <div class="warning-thumbs agentic-main-viewer">
+            <div class="warning-thumb-wrap agentic-main-wrap">
+              <span id="entryFallback" class="warning-thumb-fallback">?</span>
+              <img id="entryImage" class="warning-thumb-img" alt="Webhook snapshot" />
+            </div>
+          </div>
+          <div class="warning-meta">
+            <div id="entryName" class="warning-patient">Unknown rule</div>
+            <div id="entryCamera" class="warning-location">Unknown camera</div>
+            <div id="entryEvent" class="warning-event">Camera rule triggered</div>
+            <div id="entryTime" class="warning-time"></div>
+            <div id="entryResolution" class="warning-time"></div>
+            <div id="entryVlm" class="warning-time"></div>
+          </div>
+        </div>
+        <div id="entrySnapshots" class="warning-snapshots is-hidden">
+          <div class="warning-snapshots-title">Snapshot selector</div>
+          <div class="agentic-snapshot-selector">
+            <button type="button" class="btn btn-ghost agentic-snap-btn" id="snapSelect0">1</button>
+            <button type="button" class="btn btn-ghost agentic-snap-btn" id="snapSelect1">2</button>
+            <button type="button" class="btn btn-ghost agentic-snap-btn" id="snapSelect2">3</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ai-alerts-modal is-hidden" id="alertModal" role="dialog" aria-modal="true" aria-labelledby="alertModalTitle" hidden>
+      <div class="ai-alerts-modal-card">
+        <div class="card-head card-head-split">
+          <h2 id="alertModalTitle">Create AI alert</h2>
+          <button type="button" class="btn btn-ghost" id="closeAlertModalBtn">Close</button>
+        </div>
+        <label class="field">
+          <span>Alert name</span>
+          <input type="text" id="alertNameInput" maxlength="120" placeholder="e.g. Loitering in ambulance bay" />
+        </label>
+        <label class="field">
+          <span>Prompt</span>
+          <textarea id="alertPromptInput" class="ai-alerts-textarea" rows="6" placeholder="Describe what the AI should detect..."></textarea>
+        </label>
+        <div class="btn-row">
+          <button type="button" class="btn btn-primary" id="saveAlertBtn">Save alert</button>
+        </div>
+        <p id="alertFormStatus" class="inline-status" aria-live="polite"></p>
+      </div>
+    </div>
+    <div class="ai-alerts-modal is-hidden" id="cameraPickerModal" role="dialog" aria-modal="true" aria-labelledby="cameraPickerTitle" hidden>
+      <div class="ai-alerts-modal-card camera-picker-modal-card">
+        <div class="card-head card-head-split">
+          <h2 id="cameraPickerTitle">Camera Picker</h2>
+          <button type="button" class="btn btn-ghost" id="cameraPickerCloseBtn">Close</button>
+        </div>
+        <p id="cameraPickerStatus" class="inline-status" aria-live="polite"></p>
+        <div id="cameraPickerSections" class="camera-picker-sections"></div>
+      </div>
+    </div>
+    <script src="js/ai-alerts.js?v=2"></script>
+  </body>
+</html>

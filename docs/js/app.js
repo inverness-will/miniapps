@@ -1,8 +1,9 @@
 const $ = (id) => document.getElementById(id);
 
 const video = $("video");
+const videoWrap = $("videoWrap");
 const canvas = $("canvas");
-const startCam = $("startCam");
+const cameraOverlay = $("cameraOverlay");
 const capture = $("capture");
 const profileName = $("profileName");
 const camStatus = $("camStatus");
@@ -12,6 +13,9 @@ const listStatus = $("listStatus");
 const refreshProfiles = $("refreshProfiles");
 
 let stream = null;
+let cameraIdleTimer = null;
+const CAMERA_IDLE_MS = 30_000;
+const profileNameToId = new Map();
 
 const LS_API_BASE = "patientWatchlistApiBase";
 
@@ -83,6 +87,45 @@ function initialsFromName(name) {
   return s.slice(0, 2).toUpperCase();
 }
 
+function normalizeProfileName(name) {
+  return String(name || "")
+    .trim()
+    .toLowerCase();
+}
+
+function showCameraOverlay(show) {
+  cameraOverlay.classList.toggle("is-hidden", !show);
+}
+
+function clearCameraIdleTimer() {
+  if (cameraIdleTimer) {
+    window.clearTimeout(cameraIdleTimer);
+    cameraIdleTimer = null;
+  }
+}
+
+function stopCamera(reasonText) {
+  clearCameraIdleTimer();
+  if (stream) {
+    stream.getTracks().forEach((t) => t.stop());
+    stream = null;
+  }
+  video.srcObject = null;
+  showCameraOverlay(true);
+  if (reasonText) {
+    setCamMessage(reasonText);
+  }
+  syncCaptureButton();
+}
+
+function markCameraActivity() {
+  if (!stream) return;
+  clearCameraIdleTimer();
+  cameraIdleTimer = window.setTimeout(() => {
+    stopCamera("Camera off after 30s idle. Click camera box to enable.");
+  }, CAMERA_IDLE_MS);
+}
+
 async function removeProfile(profileId, displayName) {
   const label = displayName || profileId;
   if (
@@ -114,6 +157,7 @@ async function removeProfile(profileId, displayName) {
 
 async function loadProfiles() {
   profileList.innerHTML = "";
+  profileNameToId.clear();
   listStatus.textContent = "Loading…";
   listStatus.className = "list-foot";
   try {
@@ -135,6 +179,10 @@ async function loadProfiles() {
       return;
     }
     for (const row of rows) {
+      const nKey = normalizeProfileName(row.name || "");
+      if (nKey && row.id) {
+        profileNameToId.set(nKey, String(row.id));
+      }
       const li = document.createElement("li");
       li.className = "profile-row";
 
@@ -145,20 +193,20 @@ async function loadProfiles() {
       initials.textContent = initialsFromName(row.name || row.id);
       thumbWrap.appendChild(initials);
 
-      if (row.thumbnail_data_url) {
-        const img = document.createElement("img");
-        img.className = "profile-thumb-img";
-        img.alt = "";
-        img.loading = "lazy";
-        img.src = row.thumbnail_data_url;
-        img.addEventListener("load", () => {
-          initials.style.display = "none";
-        });
-        img.addEventListener("error", () => {
-          img.remove();
-        });
-        thumbWrap.appendChild(img);
-      }
+      const img = document.createElement("img");
+      img.className = "profile-thumb-img";
+      img.alt = "";
+      img.width = 56;
+      img.height = 56;
+      img.loading = "lazy";
+      img.src = `${apiBase()}/api/profile/${encodeURIComponent(row.id)}/thumbnail?watchlist=patients`;
+      img.addEventListener("load", () => {
+        initials.style.display = "none";
+      });
+      img.addEventListener("error", () => {
+        img.remove();
+      });
+      thumbWrap.appendChild(img);
 
       const meta = document.createElement("div");
       meta.className = "profile-meta";
@@ -229,28 +277,38 @@ async function enroll(dataUrl) {
   await loadProfiles();
 }
 
-startCam.addEventListener("click", async () => {
+function syncCaptureButton() {
+  const nameOk = profileName.value.trim().length > 0;
+  capture.disabled = !nameOk || !stream;
+}
+
+async function startCamera() {
   setCamMessage("Requesting camera…");
-  capture.disabled = true;
   try {
-    if (stream) {
-      stream.getTracks().forEach((t) => t.stop());
-      stream = null;
-    }
+    stopCamera("");
+    showCameraOverlay(false);
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+      video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
       audio: false,
     });
     video.srcObject = stream;
     await video.play();
-    setCamMessage("Camera active. Position the face, then capture.", "ok");
-    capture.disabled = false;
+    setCamMessage("Camera active. Enter a name, then capture.", "ok");
+    markCameraActivity();
   } catch (e) {
     setCamMessage(e.message || "Camera unavailable.", "err");
+    showCameraOverlay(true);
   }
+  syncCaptureButton();
+}
+
+profileName.addEventListener("input", () => {
+  syncCaptureButton();
+  markCameraActivity();
 });
 
 capture.addEventListener("click", async () => {
+  markCameraActivity();
   capture.disabled = true;
   try {
     const dataUrl = dataUrlFromVideo();
@@ -259,12 +317,32 @@ capture.addEventListener("click", async () => {
     setEnrollMessage(String(e), "err");
     setCamMessage(String(e), "err");
   } finally {
-    capture.disabled = !stream;
+    markCameraActivity();
+    syncCaptureButton();
+  }
+});
+
+videoWrap.addEventListener("click", () => {
+  if (!stream) {
+    void startCamera();
+  } else {
+    markCameraActivity();
+  }
+});
+
+videoWrap.addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter" || ev.key === " ") {
+    ev.preventDefault();
+    if (!stream) {
+      void startCamera();
+    } else {
+      markCameraActivity();
+    }
   }
 });
 
 refreshProfiles.addEventListener("click", () => {
   void loadProfiles();
 });
-
 void loadProfiles();
+void startCamera();
