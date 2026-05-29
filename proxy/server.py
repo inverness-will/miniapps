@@ -1932,6 +1932,11 @@ def health():
     )
 
 
+@app.route("/", methods=["GET", "HEAD"])
+def root():
+    return jsonify({"ok": True, "service": "miniapps-proxy"})
+
+
 def _webhook_debug_log() -> None:
     """Log incoming webhook POST to stderr (JSON pretty-print or raw body preview)."""
     print(f"[webhook] POST {request.path}", file=sys.stderr, flush=True)
@@ -2450,7 +2455,12 @@ def main():
         file=sys.stderr,
         flush=True,
     )
-    host_bind = os.environ.get("PROXY_HOST", "127.0.0.1")
+    host_bind_env = (os.environ.get("PROXY_HOST") or "").strip()
+    if host_bind_env:
+        host_bind = host_bind_env
+    else:
+        # In hosted environments (e.g. Render), bind publicly by default.
+        host_bind = "0.0.0.0" if os.environ.get("RENDER") or os.environ.get("PORT") else "127.0.0.1"
     port = int(os.environ.get("PORT") or os.environ.get("PROXY_PORT", "8765"))
     lan_ip = ""
     try:
