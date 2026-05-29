@@ -7,7 +7,7 @@ Mirrors the API flow in alta/faces.py: login → list watchlists → generate fa
 HTTP API: POST /api/enroll, GET /api/patients-profiles, GET /api/profile/<id>/thumbnail,
 DELETE /api/profile/<id>, POST /api/webhook and POST /webhook (debug log + store warning),
 GET /api/webhook-latest, POST /api/webhook-clear, GET /api/webhook-entry-latest,
-POST /api/webhook-entry-clear, POST /api/webhook-car-crossing, GET /api/car-timing-log,
+GET /api/webhook-entry-log, POST /api/webhook-entry-clear, POST /api/webhook-car-crossing, GET /api/car-timing-log,
 POST /api/car-timing-clear, GET /api/health.
 Debug: set ALTA_DEBUG=1 to log username and env wiring on stderr; add ALTA_DEBUG_LOG_PASSWORD=1
 to log password repr (remove after troubleshooting — credentials in logs are a security risk).
@@ -82,6 +82,8 @@ _EMPTY_CAMERA_WEBHOOK: dict[str, Any] = {
     "vlm_error": "",
 }
 _LATEST_CAMERA_WEBHOOK: dict[str, Any] = dict(_EMPTY_CAMERA_WEBHOOK)
+_CAMERA_WEBHOOK_HISTORY: list[dict[str, Any]] = []
+_CAMERA_WEBHOOK_HISTORY_MAX = 100
 _EMPTY_CAR_CROSSING_WEBHOOK: dict[str, Any] = {
     "ok": True,
     "has_event": False,
@@ -153,7 +155,7 @@ def _find_alert_by_name(alert_name: str) -> dict[str, str] | None:
 
 def _snapshot_data_urls(snapshots: list[dict[str, Any]]) -> list[str]:
     out: list[str] = []
-    for row in snapshots[:3]:
+    for row in snapshots[:1]:
         if not isinstance(row, dict):
             continue
         v = str(row.get("image_data_url") or "").strip()
@@ -1442,37 +1444,10 @@ def _camera_picker_sections() -> list[dict[str, Any]]:
 
 
 def _discover_live_snapshot_cameras() -> list[str]:
-    """Best-effort startup discovery so live polling starts before first webhook."""
+    """Return explicitly configured startup cameras only."""
     if LIVE_SNAPSHOT_CAMERAS:
         return [c for c in LIVE_SNAPSHOT_CAMERAS if c]
-    rows = _query_devices_rows()
-    out: list[str] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        if not bool(row.get("active", False)):
-            continue
-        live = row.get("live") if isinstance(row.get("live"), dict) else {}
-        status = str(live.get("status") or "").strip().upper()
-        if status != "CONNECTED":
-            continue
-        dev_id = str(
-            row.get("guid")
-            or row.get("id")
-            or row.get("device_id")
-            or row.get("deviceId")
-            or ""
-        ).strip()
-        if dev_id:
-            out.append(dev_id)
-    # Keep order, drop duplicates.
-    seen: set[str] = set()
-    uniq: list[str] = []
-    for dev_id in out:
-        if dev_id not in seen:
-            seen.add(dev_id)
-            uniq.append(dev_id)
-    return uniq
+    return []
 
 
 def _fetch_camera_snapshot_data_url(
@@ -1674,84 +1649,51 @@ def _build_camera_webhook_payload(body: dict[str, Any]) -> dict[str, Any]:
             "trigger_iso": trigger_iso,
         },
     ]
-    offsets = (0, -2, -4)
-    with _LIVE_SNAPSHOT_LOCK:
-        if camera_id:
-            _MONITORED_CAMERAS.add(camera_id)
-
-    live_rows = _get_recent_live_snapshots(camera_id) if camera_id else []
-    if live_rows:
+    if HOST and USERNAME and PASSWORD and camera_id and trigger_dt is not None:
         debug_trace.append(
             {
-                "step": "live-cache-hit",
+                "step": "single-snapshot-fetch",
                 "camera_id": camera_id,
-                "count": len(live_rows),
-                "max_age_s": LIVE_SNAPSHOT_MAX_AGE_SECONDS,
-            }
-        )
-        labels = ("T", "T-5s", "T-10s")
-        for idx in range(3):
-            row = live_rows[idx] if idx < len(live_rows) else None
-            snapshots.append(
-                {
-                    "label": labels[idx],
-                    "offset_seconds": -(idx * int(LIVE_SNAPSHOT_INTERVAL_SECONDS)),
-                    "requested_at": (row.get("captured_at") if row else (trigger_dt.isoformat() if trigger_dt else "")),
-                    "image_data_url": (row.get("image_data_url") if row else ""),
-                    "found": bool(row and row.get("image_data_url")),
-                    "debug": ([{"step": "live-cache-frame", "captured_at": row.get("captured_at"), "detail": row.get("detail")}]
-                    if row
-                    else [{"step": "live-cache-miss", "reason": "Not enough recent frames in 20s window"}]),
-                }
-            )
-    elif HOST and USERNAME and PASSWORD and camera_id and trigger_dt is not None:
-        debug_trace.append(
-            {
-                "step": "live-cache-empty",
-                "camera_id": camera_id,
-                "note": "Falling back to direct snapshot retrieval for now.",
+                "note": "Fetching one snapshot for the webhook trigger time.",
             }
         )
         session = requests.Session()
         try:
             do_login(session, HOST, USERNAME, PASSWORD)
             debug_trace.append({"step": "login-ok"})
-            for offset in offsets:
-                ts = trigger_dt + timedelta(seconds=offset)
-                per_snapshot_trace: list[dict[str, Any]] = []
-                # Preferred path for VLM-quality frames: ffmpeg extraction from playback stream URL template.
-                data_url = _extract_playback_frame_data_url(
-                    camera_id,
-                    ts,
-                    "1",
-                    per_snapshot_trace,
+            per_snapshot_trace: list[dict[str, Any]] = []
+            # Preferred path for VLM-quality frames: ffmpeg extraction from playback stream URL template.
+            data_url = _extract_playback_frame_data_url(
+                camera_id,
+                trigger_dt,
+                "1",
+                per_snapshot_trace,
+            )
+            if not data_url:
+                data_url = _fetch_camera_snapshot_data_url(
+                    session, HOST, camera_id, trigger_dt, per_snapshot_trace
                 )
-                if not data_url:
-                    data_url = _fetch_camera_snapshot_data_url(
-                        session, HOST, camera_id, ts, per_snapshot_trace
-                    )
-                snapshots.append(
-                    {
-                        "label": "T" if offset == 0 else f"T{offset}s",
-                        "offset_seconds": offset,
-                        "requested_at": ts.isoformat(),
-                        "image_data_url": data_url or "",
-                        "found": bool(data_url),
-                        "debug": per_snapshot_trace,
-                    }
-                )
+            snapshots.append(
+                {
+                    "label": "T",
+                    "offset_seconds": 0,
+                    "requested_at": trigger_dt.isoformat(),
+                    "image_data_url": data_url or "",
+                    "found": bool(data_url),
+                    "debug": per_snapshot_trace,
+                }
+            )
         except Exception as ex:
             debug_trace.append({"step": "login-or-fetch-error", "error": str(ex)})
             snapshots = [
                 {
-                    "label": "T" if offset == 0 else f"T{offset}s",
-                    "offset_seconds": offset,
-                    "requested_at": (trigger_dt + timedelta(seconds=offset)).isoformat(),
+                    "label": "T",
+                    "offset_seconds": 0,
+                    "requested_at": trigger_dt.isoformat(),
                     "image_data_url": "",
                     "error": str(ex),
                     "found": False,
                 }
-                for offset in offsets
             ]
     else:
         debug_trace.append(
@@ -1766,14 +1708,13 @@ def _build_camera_webhook_payload(body: dict[str, Any]) -> dict[str, Any]:
         )
         snapshots = [
             {
-                "label": "T" if offset == 0 else f"T{offset}s",
-                "offset_seconds": offset,
-                "requested_at": (trigger_dt + timedelta(seconds=offset)).isoformat() if trigger_dt else "",
+                "label": "T",
+                "offset_seconds": 0,
+                "requested_at": trigger_dt.isoformat() if trigger_dt else "",
                 "image_data_url": "",
                 "error": "Missing camera/time or Alta credentials not configured.",
                 "found": False,
             }
-            for offset in offsets
         ]
 
     matched_alert = _find_alert_by_name(rule_name)
@@ -1830,6 +1771,34 @@ def _build_camera_webhook_payload(body: dict[str, Any]) -> dict[str, Any]:
         flush=True,
     )
     return out
+
+
+def _to_camera_webhook_history_row(payload: dict[str, Any]) -> dict[str, Any]:
+    snapshots = payload.get("snapshots")
+    image_data_url = str(payload.get("image_data_url") or "").strip()
+    if not image_data_url and isinstance(snapshots, list):
+        for row in snapshots:
+            if not isinstance(row, dict):
+                continue
+            v = str(row.get("image_data_url") or "").strip()
+            if v:
+                image_data_url = v
+                break
+    rule_name = str(payload.get("patient_name") or payload.get("event") or "Unknown rule").strip()
+    ai_response = str(payload.get("vlm_analysis") or "").strip()
+    ai_error = str(payload.get("vlm_error") or "").strip()
+    if not ai_response and ai_error:
+        ai_response = f"Error: {ai_error}"
+    return {
+        "id": uuid4().hex,
+        "rule_name": rule_name,
+        "camera": str(payload.get("camera") or payload.get("location") or "").strip(),
+        "trigger_time": str(payload.get("trigger_time") or "").strip(),
+        "received_at": str(payload.get("received_at") or datetime.now(timezone.utc).isoformat()),
+        "thumbnail_data_url": image_data_url,
+        "ai_response": ai_response,
+        "matched_alert_name": str(payload.get("matched_alert_name") or "").strip(),
+    }
 
 
 def resolve_profile_thumbnail_bytes(
@@ -2039,6 +2008,9 @@ def api_webhook_entry():
     with _WEBHOOK_LOCK:
         _LATEST_CAMERA_WEBHOOK.clear()
         _LATEST_CAMERA_WEBHOOK.update(payload)
+        _CAMERA_WEBHOOK_HISTORY.insert(0, _to_camera_webhook_history_row(payload))
+        if len(_CAMERA_WEBHOOK_HISTORY) > _CAMERA_WEBHOOK_HISTORY_MAX:
+            del _CAMERA_WEBHOOK_HISTORY[_CAMERA_WEBHOOK_HISTORY_MAX:]
     return jsonify({"ok": True, "has_warning": payload.get("has_warning", False)})
 
 
@@ -2046,6 +2018,13 @@ def api_webhook_entry():
 def api_webhook_entry_latest():
     with _WEBHOOK_LOCK:
         return jsonify(dict(_LATEST_CAMERA_WEBHOOK))
+
+
+@app.route("/api/webhook-entry-log", methods=["GET"])
+def api_webhook_entry_log():
+    with _WEBHOOK_LOCK:
+        rows = list(_CAMERA_WEBHOOK_HISTORY)
+    return jsonify({"ok": True, "rows": rows})
 
 
 @app.route("/api/webhook-latest", methods=["GET"])
@@ -2070,6 +2049,7 @@ def api_webhook_entry_clear():
     with _WEBHOOK_LOCK:
         _LATEST_CAMERA_WEBHOOK.clear()
         _LATEST_CAMERA_WEBHOOK.update(dict(_EMPTY_CAMERA_WEBHOOK))
+        _CAMERA_WEBHOOK_HISTORY.clear()
         return jsonify(dict(_LATEST_CAMERA_WEBHOOK))
 
 
@@ -2461,17 +2441,15 @@ def main():
         )
     else:
         print(
-            "[proxy] live snapshot cameras: <none yet> (added automatically on first /webhook per camera)",
+            "[proxy] live snapshot cameras: <none yet> (start from UI via /api/live-snapshot/select-camera)",
             file=sys.stderr,
             flush=True,
         )
     print(
-        f"[proxy] live snapshot cadence: every {LIVE_SNAPSHOT_INTERVAL_SECONDS:.1f}s, max age {LIVE_SNAPSHOT_MAX_AGE_SECONDS:.1f}s",
+        "[proxy] live snapshot background worker is disabled; /webhook captures one snapshot per event.",
         file=sys.stderr,
         flush=True,
     )
-    t = Thread(target=_live_snapshot_worker, name="live-snapshot-worker", daemon=True)
-    t.start()
     host_bind = os.environ.get("PROXY_HOST", "127.0.0.1")
     port = int(os.environ.get("PORT") or os.environ.get("PROXY_PORT", "8765"))
     lan_ip = ""
