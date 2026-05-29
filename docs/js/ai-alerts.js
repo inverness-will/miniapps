@@ -224,7 +224,7 @@ async function loadAlerts() {
 async function loadResponseLog() {
   setResponsesStatus("Loading responses...");
   try {
-    const res = await fetch(`${apiBase()}/api/webhook-entry-log`);
+    const res = await fetch(`${apiBase()}/api/webhook-entry-log`, { cache: "no-store" });
     const data = await res.json().catch(() => ({ ok: false, rows: [] }));
     if (!data.ok) {
       setResponsesStatus(data.error || "Could not load responses.", "err");
@@ -243,7 +243,11 @@ async function clearResponseLog() {
   setResponsesStatus("Clearing responses...");
   try {
     const res = await fetch(`${apiBase()}/api/webhook-entry-clear`, { method: "POST" });
-    const data = await res.json().catch(() => ({ ok: true }));
+    const data = await res.json().catch(() => ({ ok: false, error: "Invalid JSON from server" }));
+    if (!res.ok) {
+      setResponsesStatus(data.error || `Clear failed (HTTP ${res.status})`, "err");
+      return;
+    }
     if (data && data.ok === false) {
       setResponsesStatus(data.error || "Could not clear responses.", "err");
       return;

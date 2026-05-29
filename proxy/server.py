@@ -1734,13 +1734,14 @@ def _build_camera_webhook_payload(body: dict[str, Any]) -> dict[str, Any]:
 
     vlm_analysis = ""
     vlm_error = ""
+    vlm_image_data_urls: list[str] = []
     if matched_alert:
-        urls = _snapshot_data_urls(snapshots)
-        vlm_analysis, vlm_error = _call_cloud_vlm(matched_alert_prompt, urls)
+        vlm_image_data_urls = _snapshot_data_urls(snapshots)
+        vlm_analysis, vlm_error = _call_cloud_vlm(matched_alert_prompt, vlm_image_data_urls)
         debug_trace.append(
             {
                 "step": "vlm-analysis",
-                "images_sent": len(urls),
+                "images_sent": len(vlm_image_data_urls),
                 "analysis_ok": bool(vlm_analysis),
                 "error": vlm_error,
             }
@@ -1764,6 +1765,7 @@ def _build_camera_webhook_payload(body: dict[str, Any]) -> dict[str, Any]:
         "matched_alert_name": matched_alert_name,
         "vlm_analysis": vlm_analysis,
         "vlm_error": vlm_error,
+        "vlm_image_data_urls": vlm_image_data_urls,
     }
     print(
         "[webhook:/webhook] snapshot debug:\n" + json.dumps(out.get("debug_trace", []), indent=2, default=str),
@@ -1774,6 +1776,14 @@ def _build_camera_webhook_payload(body: dict[str, Any]) -> dict[str, Any]:
 
 
 def _to_camera_webhook_history_row(payload: dict[str, Any]) -> dict[str, Any]:
+    vlm_image_data_urls = payload.get("vlm_image_data_urls")
+    ai_thumbnail_data_url = ""
+    if isinstance(vlm_image_data_urls, list):
+        for v in vlm_image_data_urls:
+            s = str(v or "").strip()
+            if s:
+                ai_thumbnail_data_url = s
+                break
     snapshots = payload.get("snapshots")
     image_data_url = str(payload.get("image_data_url") or "").strip()
     if not image_data_url and isinstance(snapshots, list):
@@ -1795,7 +1805,7 @@ def _to_camera_webhook_history_row(payload: dict[str, Any]) -> dict[str, Any]:
         "camera": str(payload.get("camera") or payload.get("location") or "").strip(),
         "trigger_time": str(payload.get("trigger_time") or "").strip(),
         "received_at": str(payload.get("received_at") or datetime.now(timezone.utc).isoformat()),
-        "thumbnail_data_url": image_data_url,
+        "thumbnail_data_url": ai_thumbnail_data_url or image_data_url,
         "ai_response": ai_response,
         "matched_alert_name": str(payload.get("matched_alert_name") or "").strip(),
     }
@@ -2055,7 +2065,7 @@ def api_webhook_entry_clear():
         _LATEST_CAMERA_WEBHOOK.clear()
         _LATEST_CAMERA_WEBHOOK.update(dict(_EMPTY_CAMERA_WEBHOOK))
         _CAMERA_WEBHOOK_HISTORY.clear()
-        return jsonify(dict(_LATEST_CAMERA_WEBHOOK))
+        return jsonify({"ok": True, "rows": [], "latest": dict(_LATEST_CAMERA_WEBHOOK)})
 
 
 @app.route("/api/webhook-car-crossing", methods=["POST"])
